@@ -1,0 +1,209 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PIQI Lab MessageAudit Submission Client</title>
+    <link rel="stylesheet" href="piqi-client.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>PIQI Lab MessageAudit Submission Client</h1>
+
+        <!-- Spreadsheet Paste Section -->
+        <div class="paste-section">
+            <h2>📋 Paste Spreadsheet Row</h2>
+            <div class="form-group">
+                <label for="spreadsheetInput">Paste a row from your spreadsheet here (including data row only, no header):</label>
+                <textarea id="spreadsheetInput" placeholder="Paste your spreadsheet row here (tab-separated values)"></textarea>
+                <div class="helper-text">Copy a single row from your spreadsheet and paste it here. The data should be tab-separated.</div>
+            </div>
+            <div class="button-group">
+                <button type="button" class="convert-btn" onclick="convertSpreadsheetToJSON()">Convert to JSON</button>
+                <button type="button" class="clear-btn" onclick="clearSpreadsheetInput()">Clear Paste Area</button>
+            </div>
+            <div class="status-message" id="conversionStatus"></div>
+        </div>
+
+        <form id="apiForm">
+            <div class="api-url-group">
+                <div class="form-group">
+                    <label for="apiUrl">API Endpoint URL:</label>
+                    <input type="text" id="apiUrl" value="http://localhost:5025/PIQI/ScoreAuditMessage" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="dataProviderID">Data Provider ID:</label>
+                <input type="text" id="dataProviderID" value="Russ" required>
+            </div>
+            <div class="form-group">
+                <label for="dataSourceID">Data Source ID:</label>
+                <input type="text" id="dataSourceID" value="Russ" required>
+            </div>
+            <div class="form-group">
+                <label for="piqiModelMnemonic">PIQI Model Mnemonic:</label>
+                <select id="piqiModelMnemonic" required>
+                    <option value="PAT_CLINICAL_V1">PAT_CLINICAL_V1</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="evaluationRubricMnemonic">Evaluation Rubric Mnemonic:</label>
+                <select id="evaluationRubricMnemonic" required>
+                    <option value="USCDI_V3">USCDI_V3</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="messageData">Message Data (JSON):</label>
+                <textarea id="messageData" class="json-output" required></textarea>
+                <div class="helper-text">This will be automatically populated when you convert a spreadsheet row, or you can manually enter JSON here.</div>
+            </div>
+            <div class="button-group">
+                <button type="submit" class="submit-btn">Submit Request</button>
+                <button type="button" class="preview-btn" onclick="previewRequest()">Preview Request Body</button>
+                <button type="button" class="clear-btn" onclick="clearForm()">Clear Form</button>
+            </div>
+            <div class="loading" id="loading">Sending request...</div>
+        </form>
+
+        <div class="preview-section" id="previewSection">
+            <div class="preview-header">Preview of Request Body (with escaped messageData):</div>
+            <div class="preview-content" id="previewContent"></div>
+        </div>
+
+        <div class="response-section" id="responseSection">
+            <div class="response-header" id="responseHeader"></div>
+            <div id="formattedResponseContainer"></div>
+            <button class="toggle-raw-btn" id="toggleRawBtn" onclick="toggleRawResponse()">Show Raw JSON Response</button>
+            <div class="raw-response" id="rawResponse">
+                <h3>Raw JSON Response:</h3>
+                <div class="response-content" id="responseContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Page-specific functions for SimpleLabPIQIClient.html
+
+        const COLUMN_MAP = {
+            0: 'UniqueID', 1: 'LongAccessionNumberUID', 2: 'LabChemTestSID', 3: 'LabChemTestName',
+            4: 'LabChemTestUrgencySID', 5: 'Urgency', 6: 'LabChemResultValue', 7: 'LabChemResultNumericValue',
+            8: 'TopographySID', 9: 'Topography', 10: 'AccessionInstitutionSID', 11: 'AccessioningInstitution',
+            12: 'OrderingInstitutionSID', 13: 'OrderingInstutionName', 14: 'CollectingInstitutionSID',
+            15: 'CollectingInstitutionName', 16: 'LOINCSID', 17: 'LOINC', 18: 'Units',
+            19: 'Abnormal', 20: 'RefHigh', 21: 'RefLow'
+        };
+
+        function convertSpreadsheetToJSON() {
+            const input = document.getElementById('spreadsheetInput').value.trim();
+            if (!input) {
+                showStatus('Please paste a spreadsheet row first.', 'error');
+                return;
+            }
+            try {
+                const values = input.split('\t');
+                if (values.length < 22) {
+                    showStatus(`Warning: Expected 22 columns, but found ${values.length}.`, 'error');
+                }
+                const labResult = {
+                    test: { codings: [], text: values[3] || '' },
+                    referenceRange: {},
+                    resultValue: { text: values[6] || '', type: { text: 'PQ' } },
+                    resultUnit: { text: values[18] || '' }
+                };
+                if (values[17]) {
+                    labResult.test.codings.push({
+                        code: values[17], display: values[3] || '', system: '2.16.840.1.113883.6.1'
+                    });
+                }
+                if (values[21]) labResult.referenceRange.lowValue = values[21];
+                if (values[20]) labResult.referenceRange.highValue = values[20];
+                labResult.interpretation = values[19] ? {
+                    codings: [{ code: values[19], system: '2.16.840.1.113883.5.83' }], text: values[19]
+                } : {
+                    codings: [{ code: 'N', system: '2.16.840.1.113883.5.83' }], text: 'N'
+                };
+                const uniqueID = values[0] || '';
+                const messageData = {
+                    messageId: uniqueID, formatID: '', useCaseID: '',
+                    patient: { labResults: [labResult], id: uniqueID },
+                    dataSourceID: document.getElementById('dataSourceID').value,
+                    dataProviderID: document.getElementById('dataProviderID').value,
+                    messageID: uniqueID
+                };
+                document.getElementById('messageData').value = JSON.stringify(messageData, null, 2);
+                showStatus('✓ Successfully converted spreadsheet row to JSON!', 'success');
+                document.getElementById('messageData').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (error) {
+                showStatus('Error converting spreadsheet data: ' + error.message, 'error');
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('conversionStatus');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status-message show ' + type;
+            setTimeout(() => { statusDiv.classList.remove('show'); }, 5000);
+        }
+
+        function clearSpreadsheetInput() {
+            document.getElementById('spreadsheetInput').value = '';
+            document.getElementById('conversionStatus').classList.remove('show');
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            document.getElementById('messageData').value = '';
+        });
+
+        function buildRequestBody() {
+            const messageDataStr = document.getElementById('messageData').value;
+            let messageDataParsed;
+            try {
+                messageDataParsed = JSON.parse(messageDataStr);
+            } catch (parseError) {
+                throw new Error('Invalid JSON in Message Data field: ' + parseError.message);
+            }
+            const messageID = messageDataParsed.messageID || messageDataParsed.messageId || '';
+            return {
+                dataProviderID: document.getElementById('dataProviderID').value,
+                dataSourceID: document.getElementById('dataSourceID').value,
+                messageID: messageID,
+                piqiModelMnemonic: document.getElementById('piqiModelMnemonic').value,
+                evaluationRubricMnemonic: document.getElementById('evaluationRubricMnemonic').value,
+                messageData: JSON.stringify(messageDataParsed)
+            };
+        }
+
+        function clearForm() {
+            if (confirm('Are you sure you want to clear the form?')) {
+                document.getElementById('apiForm').reset();
+                document.getElementById('messageData').value = '';
+                document.getElementById('responseSection').classList.remove('show');
+                document.getElementById('previewSection').classList.remove('show');
+                document.getElementById('spreadsheetInput').value = '';
+                document.getElementById('conversionStatus').classList.remove('show');
+            }
+        }
+    </script>
+    <script src="piqi-config.js"></script>
+    <script src="piqi-client.js"></script>
+
+    <!-- Value Modal Dialog -->
+    <div id="valueModal" class="modal-overlay">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h2 class="modal-title">Attribute Value</h2>
+                <button class="modal-close-btn" onclick="closeValueModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="json-display" id="jsonDisplay"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-copy-btn" id="modalCopyBtn" onclick="copyToClipboard()">Copy to Clipboard</button>
+                <button class="modal-close-footer-btn" onclick="closeValueModal()">Close</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

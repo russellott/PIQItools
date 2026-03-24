@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PIQI MessageAudit Submission Client</title>
+    <link rel="stylesheet" href="piqi-client.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>PIQI MessageAudit Submission Client</h1>
+
+        <!-- Paste PIQI JSON Section -->
+        <div class="paste-section">
+            <h2>📋 Paste PIQI JSON Message</h2>
+            <div class="form-group">
+                <label for="piqiJsonInput">Paste your PIQI-formatted JSON message here:</label>
+                <textarea id="piqiJsonInput" class="json-output"
+                    placeholder="Paste your PIQI JSON message here..."></textarea>
+            </div>
+        </div>
+
+        <form id="apiForm">
+            <div class="api-url-group">
+                <div class="form-group">
+                    <label for="apiUrl">API Endpoint URL:</label>
+                    <input type="text" id="apiUrl" value="http://localhost:5025/PIQI/ScoreAuditMessage" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="dataProviderID">Data Provider ID:</label>
+                <input type="text" id="dataProviderID" value="Russ" required>
+            </div>
+
+            <div class="form-group">
+                <label for="dataSourceID">Data Source ID:</label>
+                <input type="text" id="dataSourceID" value="Russ" required>
+            </div>
+
+            <div class="form-group">
+                <label for="piqiModelMnemonic">PIQI Model Mnemonic:</label>
+                <select id="piqiModelMnemonic" required>
+                    <option value="PAT_CLINICAL_V1">PAT_CLINICAL_V1</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="evaluationRubricMnemonic">Evaluation Rubric Mnemonic:</label>
+                <select id="evaluationRubricMnemonic" required>
+                    <option value="USCDI_V3">USCDI_V3</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="submit-btn">Submit Request</button>
+                <button type="button" class="preview-btn" onclick="previewRequest()">Preview Request Body</button>
+                <button type="button" class="clear-btn" onclick="clearForm()">Clear Form</button>
+            </div>
+
+            <div class="loading" id="loading">
+                Sending request...
+            </div>
+        </form>
+
+        <div class="preview-section" id="previewSection">
+            <div class="preview-header">Preview of Request Body (with escaped messageData):</div>
+            <div class="preview-content" id="previewContent"></div>
+        </div>
+
+        <div class="response-section" id="responseSection">
+            <div class="response-header" id="responseHeader"></div>
+            <div id="formattedResponseContainer"></div>
+            <button class="toggle-raw-btn" id="toggleRawBtn" onclick="toggleRawResponse()">Show Raw JSON
+                Response</button>
+            <div class="raw-response" id="rawResponse">
+                <h3>Raw JSON Response:</h3>
+                <div class="response-content" id="responseContent"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Page-specific functions for SimplePIQIClient.html
+
+        // Build request body using the pasted PIQI JSON directly
+        function buildRequestBody() {
+            const messageDataStr = document.getElementById('piqiJsonInput').value;
+
+            let messageDataParsed;
+            try {
+                messageDataParsed = JSON.parse(messageDataStr);
+            } catch (parseError) {
+                throw new Error('Invalid JSON in PIQI message: ' + parseError.message);
+            }
+
+            const messageID = messageDataParsed.messageID || messageDataParsed.messageId || '';
+
+            return {
+                dataProviderID: document.getElementById('dataProviderID').value,
+                dataSourceID: document.getElementById('dataSourceID').value,
+                messageID: messageID,
+                piqiModelMnemonic: document.getElementById('piqiModelMnemonic').value,
+                evaluationRubricMnemonic: document.getElementById('evaluationRubricMnemonic').value,
+                messageData: JSON.stringify(messageDataParsed)
+            };
+        }
+
+        function clearForm() {
+            if (confirm('Are you sure you want to clear the form?')) {
+                document.getElementById('apiForm').reset();
+                document.getElementById('piqiJsonInput').value = '';
+                document.getElementById('responseSection').classList.remove('show');
+                document.getElementById('previewSection').classList.remove('show');
+            }
+        }
+    </script>
+    <script src="piqi-config.js"></script>
+    <script src="piqi-client.js"></script>
+
+    <!-- Value Modal Dialog -->
+    <div id="valueModal" class="modal-overlay">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h2 class="modal-title">Attribute Value</h2>
+                <button class="modal-close-btn" onclick="closeValueModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="json-display" id="jsonDisplay"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-copy-btn" id="modalCopyBtn" onclick="copyToClipboard()">Copy to Clipboard</button>
+                <button class="modal-close-footer-btn" onclick="closeValueModal()">Close</button>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
