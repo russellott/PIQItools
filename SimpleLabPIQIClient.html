@@ -106,11 +106,15 @@
                 if (values.length < 22) {
                     showStatus(`Warning: Expected 22 columns, but found ${values.length}.`, 'error');
                 }
+                const unitsValue = values[18] || '';
                 const labResult = {
                     test: { codings: [], text: values[3] || '' },
                     referenceRange: {},
                     resultValue: { text: values[6] || '', type: { text: 'PQ' } },
-                    resultUnit: { text: values[18] || '' }
+                    resultUnit: {
+                        codings: unitsValue ? [{ code: unitsValue, display: unitsValue, system: 'UCUM' }] : [],
+                        text: unitsValue
+                    }
                 };
                 if (values[17]) {
                     labResult.test.codings.push({
