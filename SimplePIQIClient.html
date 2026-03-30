@@ -12,13 +12,20 @@
     <div class="container">
         <h1>PIQI MessageAudit Submission Client</h1>
 
-        <!-- Paste PIQI JSON Section -->
+        <!-- Paste JSON Section -->
         <div class="paste-section">
-            <h2>📋 Paste PIQI JSON Message</h2>
+            <h2>📋 Paste JSON Message</h2>
+            <div class="form-group">
+                <label for="inputContentType">Pasted Content Type:</label>
+                <select id="inputContentType" required>
+                    <option value="PIQI">PIQI JSON</option>
+                    <option value="FHIR">FHIR JSON</option>
+                </select>
+            </div>
             <div class="form-group">
                 <label for="piqiJsonInput">Paste your PIQI-formatted JSON message here:</label>
                 <textarea id="piqiJsonInput" class="json-output"
-                    placeholder="Paste your PIQI JSON message here..."></textarea>
+                    placeholder="Paste your PIQI or FHIR JSON message here..."></textarea>
             </div>
         </div>
 
@@ -28,16 +35,10 @@
                     <label for="apiUrl">API Endpoint URL:</label>
                     <input type="text" id="apiUrl" value="http://localhost:5025/PIQI/ScoreAuditMessage" required>
                 </div>
-            </div>
-
-            <div class="form-group">
-                <label for="dataProviderID">Data Provider ID:</label>
-                <input type="text" id="dataProviderID" value="Russ" required>
-            </div>
-
-            <div class="form-group">
-                <label for="dataSourceID">Data Source ID:</label>
-                <input type="text" id="dataSourceID" value="Russ" required>
+                <div class="form-group">
+                    <label for="fhirConversionApiUrl">FHIR Conversion API URL:</label>
+                    <input type="text" id="fhirConversionApiUrl" value="http://localhost:5000/convertToPiqi" required>
+                </div>
             </div>
 
             <div class="form-group">
@@ -52,6 +53,16 @@
                 <select id="evaluationRubricMnemonic" required>
                     <option value="USCDI_V3">USCDI_V3</option>
                 </select>
+            </div>
+
+            <div class="form-group">
+                <label for="dataProviderID">Data Provider ID:</label>
+                <input type="text" id="dataProviderID" required>
+            </div>
+
+            <div class="form-group">
+                <label for="dataSourceID">Data Source ID:</label>
+                <input type="text" id="dataSourceID" required>
             </div>
 
             <div class="button-group">
@@ -86,16 +97,142 @@
     <script>
         // Page-specific functions for SimplePIQIClient.html
 
-        // Build request body using the pasted PIQI JSON directly
-        function buildRequestBody() {
-            const messageDataStr = document.getElementById('piqiJsonInput').value;
-
-            let messageDataParsed;
-            try {
-                messageDataParsed = JSON.parse(messageDataStr);
-            } catch (parseError) {
-                throw new Error('Invalid JSON in PIQI message: ' + parseError.message);
+        // Generate a random session ID
+        function generateSessionID() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let sessionID = '';
+            for (let i = 0; i < 32; i++) {
+                sessionID += chars.charAt(Math.floor(Math.random() * chars.length));
             }
+            return 'Session ID ' + sessionID;
+        }
+
+        // Initialize session IDs on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            const sessionID = generateSessionID();
+            document.getElementById('dataProviderID').value = sessionID;
+            document.getElementById('dataSourceID').value = sessionID;
+        });
+
+        async function convertFhirToPiqi(fhirParsedMessage) {
+            const conversionApiUrl = document.getElementById('fhirConversionApiUrl').value;
+
+            const conversionRequestBody = {
+                InputDataString: JSON.stringify(fhirParsedMessage, null, 2),
+                RootTemplateName: 'BundleJSON',
+                OutputFormat: 'json',
+                IncludeTraceInfo: false,
+                CorrelationId: 'rest-client-001'
+            };
+
+            async function callConversionApi(url, method) {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(conversionRequestBody)
+                });
+
+                let data;
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    data = await response.text();
+                }
+
+                return { response, data };
+            }
+
+            const candidateUrls = conversionApiUrl.endsWith('/')
+                ? [conversionApiUrl, conversionApiUrl.slice(0, -1)]
+                : [conversionApiUrl, conversionApiUrl + '/'];
+            const candidateMethods = ['POST', 'PUT'];
+
+            let lastAttemptError = null;
+            let successfulConversionData = null;
+
+            for (const method of candidateMethods) {
+                for (const url of candidateUrls) {
+                    const attempt = await callConversionApi(url, method);
+                    if (attempt.response.ok) {
+                        successfulConversionData = attempt.data;
+                        break;
+                    }
+
+                    const errorText = typeof attempt.data === 'object'
+                        ? JSON.stringify(attempt.data)
+                        : attempt.data;
+
+                    lastAttemptError = {
+                        status: attempt.response.status,
+                        method: method,
+                        url: url,
+                        errorText: errorText
+                    };
+
+                    if (attempt.response.status !== 405) {
+                        throw new Error('FHIR conversion failed (Status: ' + attempt.response.status + ', Method: ' + method + ', URL: ' + url + '): ' + errorText);
+                    }
+                }
+
+                if (successfulConversionData !== null) {
+                    break;
+                }
+            }
+
+            if (successfulConversionData === null) {
+                throw new Error('FHIR conversion failed with 405 Method Not Allowed. Tried methods POST and PUT at ' + candidateUrls.join(' and ') + '. Last attempt was ' + lastAttemptError.method + ' ' + lastAttemptError.url + '.');
+            }
+
+            const conversionData = successfulConversionData;
+
+            if (typeof conversionData === 'string') {
+                try {
+                    return JSON.parse(conversionData);
+                } catch (parseError) {
+                    throw new Error('FHIR conversion API returned non-JSON text.');
+                }
+            }
+
+            if (conversionData && typeof conversionData === 'object') {
+                if (conversionData.messageData) {
+                    if (typeof conversionData.messageData === 'string') {
+                        return JSON.parse(conversionData.messageData);
+                    }
+                    return conversionData.messageData;
+                }
+
+                if (conversionData.OutputDataString && typeof conversionData.OutputDataString === 'string') {
+                    return JSON.parse(conversionData.OutputDataString);
+                }
+
+                if (conversionData.outputDataString && typeof conversionData.outputDataString === 'string') {
+                    return JSON.parse(conversionData.outputDataString);
+                }
+
+                return conversionData;
+            }
+
+            throw new Error('FHIR conversion API returned an unexpected response format.');
+        }
+
+        // Build request body using PIQI JSON directly or by converting FHIR JSON first
+        async function buildRequestBody() {
+            const messageDataStr = document.getElementById('piqiJsonInput').value;
+            const inputContentType = document.getElementById('inputContentType').value;
+
+            let parsedInput;
+            try {
+                parsedInput = JSON.parse(messageDataStr);
+            } catch (parseError) {
+                throw new Error('Invalid JSON in pasted message: ' + parseError.message);
+            }
+
+            const messageDataParsed = inputContentType === 'FHIR'
+                ? await convertFhirToPiqi(parsedInput)
+                : parsedInput;
 
             const messageID = messageDataParsed.messageID || messageDataParsed.messageId || '';
 

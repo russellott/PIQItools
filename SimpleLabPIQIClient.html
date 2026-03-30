@@ -35,14 +35,6 @@
                 </div>
             </div>
             <div class="form-group">
-                <label for="dataProviderID">Data Provider ID:</label>
-                <input type="text" id="dataProviderID" value="Russ" required>
-            </div>
-            <div class="form-group">
-                <label for="dataSourceID">Data Source ID:</label>
-                <input type="text" id="dataSourceID" value="Russ" required>
-            </div>
-            <div class="form-group">
                 <label for="piqiModelMnemonic">PIQI Model Mnemonic:</label>
                 <select id="piqiModelMnemonic" required>
                     <option value="PAT_CLINICAL_V1">PAT_CLINICAL_V1</option>
@@ -53,6 +45,14 @@
                 <select id="evaluationRubricMnemonic" required>
                     <option value="USCDI_V3">USCDI_V3</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label for="dataProviderID">Data Provider ID:</label>
+                <input type="text" id="dataProviderID" required>
+            </div>
+            <div class="form-group">
+                <label for="dataSourceID">Data Source ID:</label>
+                <input type="text" id="dataSourceID" required>
             </div>
             <div class="form-group">
                 <label for="messageData">Message Data (JSON):</label>
@@ -85,6 +85,23 @@
 
     <script>
         // Page-specific functions for SimpleLabPIQIClient.html
+
+        // Generate a random session ID
+        function generateSessionID() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let sessionID = '';
+            for (let i = 0; i < 32; i++) {
+                sessionID += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return 'Session ID ' + sessionID;
+        }
+
+        // Initialize session IDs on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            const sessionID = generateSessionID();
+            document.getElementById('dataProviderID').value = sessionID;
+            document.getElementById('dataSourceID').value = sessionID;
+        });
 
         const COLUMN_MAP = {
             0: 'UniqueID', 1: 'LongAccessionNumberUID', 2: 'LabChemTestSID', 3: 'LabChemTestName',

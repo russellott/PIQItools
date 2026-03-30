@@ -208,12 +208,12 @@ function formatJSONWithFailedHighlight(obj, indent = 0) {
 // Request preview
 // ---------------------------------------------------------------------------
 
-function previewRequest() {
+async function previewRequest() {
     const previewSection = document.getElementById('previewSection');
     const previewContent = document.getElementById('previewContent');
 
     try {
-        const requestBody = buildRequestBody();
+        const requestBody = await Promise.resolve(buildRequestBody());
         previewContent.textContent = JSON.stringify(requestBody, null, 2);
         previewSection.classList.add('show');
         previewSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -552,7 +552,7 @@ document.getElementById('apiForm').addEventListener('submit', async function (e)
 
     try {
         const apiUrl = document.getElementById('apiUrl').value;
-        const requestBody = buildRequestBody();
+        const requestBody = await Promise.resolve(buildRequestBody());
 
         console.log('Sending request to:', apiUrl);
         console.log('Request body:', requestBody);
