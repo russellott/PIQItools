@@ -107,6 +107,15 @@
             return 'Session ID ' + sessionID;
         }
 
+        function generateMessageID() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+
+            const randomPart = Math.random().toString(36).slice(2, 10);
+            return 'msg-' + Date.now() + '-' + randomPart;
+        }
+
         // Initialize session IDs on page load
         document.addEventListener('DOMContentLoaded', function () {
             const sessionID = generateSessionID();
@@ -238,7 +247,10 @@
                 ? await convertFhirToPiqi(parsedInput)
                 : parsedInput;
 
-            const messageID = messageDataParsed.messageID || messageDataParsed.messageId || '';
+            let messageID = messageDataParsed.messageID || messageDataParsed.messageId || '';
+            if (inputContentType === 'FHIR' && !messageID) {
+                messageID = generateMessageID();
+            }
 
             return {
                 dataProviderID: document.getElementById('dataProviderID').value,
