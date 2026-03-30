@@ -37,7 +37,7 @@
                 </div>
                 <div class="form-group">
                     <label for="fhirConversionApiUrl">FHIR Conversion API URL:</label>
-                    <input type="text" id="fhirConversionApiUrl" value="http://localhost:5000/convertToPiqi" required>
+                    <input type="text" id="fhirConversionApiUrl" value="https://localhost:5001/convertToPiqi" required>
                 </div>
             </div>
 
@@ -116,6 +116,10 @@
 
         async function convertFhirToPiqi(fhirParsedMessage) {
             const conversionApiUrl = document.getElementById('fhirConversionApiUrl').value;
+
+            if (window.location.protocol === 'https:' && conversionApiUrl.startsWith('http://')) {
+                throw new Error('Blocked by browser security: this page is served over HTTPS and cannot call an HTTP conversion endpoint. Use an HTTPS conversion URL (for example, https://localhost:5001/convertToPiqi) and ensure CORS is enabled on the conversion API.');
+            }
 
             const conversionRequestBody = {
                 InputDataString: JSON.stringify(fhirParsedMessage, null, 2),
