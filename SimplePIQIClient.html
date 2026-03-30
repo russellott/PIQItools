@@ -210,6 +210,20 @@
             }
 
             if (conversionData && typeof conversionData === 'object') {
+                if (conversionData.Result !== undefined) {
+                    if (typeof conversionData.Result === 'string') {
+                        return JSON.parse(conversionData.Result);
+                    }
+                    return conversionData.Result;
+                }
+
+                if (conversionData.result !== undefined) {
+                    if (typeof conversionData.result === 'string') {
+                        return JSON.parse(conversionData.result);
+                    }
+                    return conversionData.result;
+                }
+
                 if (conversionData.messageData) {
                     if (typeof conversionData.messageData === 'string') {
                         return JSON.parse(conversionData.messageData);
