@@ -1,6 +1,9 @@
 // Shared JavaScript for PIQI client pages.
 // Each page must define buildRequestBody() and clearForm() locally.
 
+let currentFormattedResponseData = null;
+let showFailedOnlyAssessmentItems = false;
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -158,7 +161,7 @@ function formatJSONWithFailedHighlight(obj, indent = 0) {
 
     if (typeof obj !== 'object') {
         if (typeof obj === 'string') {
-            return `"${obj}"`;
+            return '"' + obj + '"';
         }
         return String(obj);
     }
@@ -171,7 +174,7 @@ function formatJSONWithFailedHighlight(obj, indent = 0) {
             const isFailed = hasFailedStatus(item);
 
             if (isFailed) {
-                result += `${nextIndentStr}<span class="failed-assessment-item">`;
+                result += nextIndentStr + '<span class="failed-assessment-item">';
             } else {
                 result += nextIndentStr;
             }
@@ -195,7 +198,7 @@ function formatJSONWithFailedHighlight(obj, indent = 0) {
 
     let result = '{\n';
     keys.forEach((key, index) => {
-        result += `${nextIndentStr}"${key}": `;
+        result += nextIndentStr + '"' + key + '": ';
         result += formatJSONWithFailedHighlight(obj[key], indent + 1);
         if (index < keys.length - 1) result += ',';
         result += '\n';
@@ -231,6 +234,10 @@ function getScoreBadgeClass(score) {
     if (score >= 80) return 'score-high';
     if (score >= 50) return 'score-medium';
     return 'score-low';
+}
+
+function isFailedStatus(status) {
+    return typeof status === 'string' && status.toLowerCase() === 'failed';
 }
 
 function formatMessageResults(messageResults) {
@@ -313,6 +320,9 @@ function formatDataClassResults(dataClassResults, auditedMessage) {
     }
 
     let html = '<h2>Data Class Results Summary</h2>';
+    html += '<button type="button" class="toggle-raw-btn" onclick="toggleFailedOnlyRows()">'
+        + (showFailedOnlyAssessmentItems ? 'Show All Statuses' : 'Show FAILED Only')
+        + '</button>';
 
     const dataClassPaths = {
         'Lab Results': 'labResults',
@@ -341,7 +351,11 @@ function formatDataClassResults(dataClassResults, auditedMessage) {
 
         const assessmentItems = extractAssessmentItems(parsedAuditedMessage, dataPath);
 
-        if (assessmentItems.length > 0) {
+        const visibleAssessmentItems = showFailedOnlyAssessmentItems
+            ? assessmentItems.filter(item => isFailedStatus(item.status))
+            : assessmentItems;
+
+        if (visibleAssessmentItems.length > 0) {
             html += '<div style="overflow-x: auto;">';
             html += '<table class="assessment-table">';
             html += '<thead>';
@@ -356,7 +370,7 @@ function formatDataClassResults(dataClassResults, auditedMessage) {
             html += '</thead>';
             html += '<tbody>';
 
-            assessmentItems.forEach(item => {
+            visibleAssessmentItems.forEach(item => {
                 const statusClass = getStatusClass(item.status);
                 const attrValueDisplay = item.attributeValue || 'N/A';
                 html += '<tr>';
@@ -377,7 +391,11 @@ function formatDataClassResults(dataClassResults, auditedMessage) {
             html += '</table>';
             html += '</div>';
         } else {
-            html += '<p class="info">No assessment items found for this data class.</p>';
+            if (showFailedOnlyAssessmentItems) {
+                html += '<p class="info">No failed assessment items found for this data class.</p>';
+            } else {
+                html += '<p class="info">No assessment items found for this data class.</p>';
+            }
         }
 
         html += '</div>';
@@ -484,6 +502,7 @@ function formatAuditedMessage(auditedMessage) {
 
 function displayFormattedResponse(responseData) {
     const container = document.getElementById('formattedResponseContainer');
+    currentFormattedResponseData = responseData;
     let html = '<div class="formatted-response">';
 
     if (responseData.scoringData) {
@@ -530,6 +549,14 @@ function toggleAuditedMessage() {
     } else {
         content.classList.add('collapsed');
         btn.textContent = 'Expand';
+    }
+}
+
+function toggleFailedOnlyRows() {
+    showFailedOnlyAssessmentItems = !showFailedOnlyAssessmentItems;
+
+    if (currentFormattedResponseData) {
+        displayFormattedResponse(currentFormattedResponseData);
     }
 }
 

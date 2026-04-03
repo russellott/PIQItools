@@ -121,7 +121,7 @@
             try {
                 const values = input.split('\t');
                 if (values.length < 22) {
-                    showStatus(`Warning: Expected 22 columns, but found ${values.length}.`, 'error');
+                    showStatus('Warning: Expected 22 columns, but found ' + values.length + '.', 'error');
                 }
                 const unitsValue = values[18] || '';
                 const labResult = {
