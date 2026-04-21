@@ -1,0 +1,20 @@
+{
+  "runId": "8add61dcfd45f78d5c080ddc",
+  "processed": 1002,
+  "succeeded": 999,
+  "failed": 3,
+  "totalRunMs": 92732,
+  "rowsPerSecond": 10.81,
+  "avgApiSubmitMsPerRow": 91.74,
+  "stageMs": {
+    "excelReadMs": 73,
+    "accessInitMs": 0,
+    "messageBuildMs": 41,
+    "requestSerializeMs": 6,
+    "apiSubmitMs": 91924,
+    "assessmentExtractMs": 0,
+    "accessWriteMs": 0,
+    "auditWriteMs": 357,
+    "closeResourcesMs": 2
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "piqi-tools-batch",
+  "version": "1.0.0",
+  "description": "Batch PIQI utilities for Excel ingestion, API submission, and Access persistence",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "init:access": "node src/cli/init-access-db.js",
+    "process:lab": "node src/cli/process-lab-excel.js",
+    "benchmark:compare": "node compare-benchmarks.js",
+    "check": "node --check src/cli/init-access-db.js && node --check src/cli/process-lab-excel.js && node --check src/core/lab-piqi-core.js && node --check src/api/piqi-api.js && node --check src/db/access-db.js && node --check src/audit/flat-file-audit.js && node --check compare-benchmarks.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "odbc": "^2.5.0"
+  }
+}
