@@ -320,7 +320,13 @@ function Extract-AssessmentItems {
 
     $parsedResponse = $null
     try {
-        $parsedResponse = ConvertFrom-Json -InputObject $ResponseBody -Depth 100
+        # Use -Depth only if available (PowerShell 7+), otherwise fall back to default
+        if ($PSVersionTable.PSVersion.Major -ge 7) {
+            $parsedResponse = ConvertFrom-Json -InputObject $ResponseBody -Depth 100
+        }
+        else {
+            $parsedResponse = ConvertFrom-Json -InputObject $ResponseBody
+        }
     }
     catch {
         return @()
@@ -343,7 +349,12 @@ function Extract-AssessmentItems {
     $parsedMessage = $null
     try {
         $parsedMessage = if ($auditedMessage -is [string]) {
-            ConvertFrom-Json -InputObject $auditedMessage -Depth 100
+            if ($PSVersionTable.PSVersion.Major -ge 7) {
+                ConvertFrom-Json -InputObject $auditedMessage -Depth 100
+            }
+            else {
+                ConvertFrom-Json -InputObject $auditedMessage
+            }
         }
         else {
             $auditedMessage
@@ -353,7 +364,36 @@ function Extract-AssessmentItems {
         return @()
     }
 
-    if ($null -eq $parsedMessage.patient) {
+    if ($null -eq $parsedMessage) {
+        return @()
+    }
+
+    $resolvedMessage = $parsedMessage
+    if ($null -eq $resolvedMessage.patient) {
+        $innerPayload = $null
+        if ($resolvedMessage.PSObject.Properties['messageData']) {
+            $innerPayload = $resolvedMessage.messageData
+        }
+        elseif ($resolvedMessage.PSObject.Properties['auditedMessage']) {
+            $innerPayload = $resolvedMessage.auditedMessage
+        }
+
+        if ($null -ne $innerPayload) {
+            try {
+                $resolvedMessage = if ($innerPayload -is [string]) {
+                    ConvertFrom-Json -InputObject $innerPayload -Depth 100
+                }
+                else {
+                    $innerPayload
+                }
+            }
+            catch {
+                $resolvedMessage = $null
+            }
+        }
+    }
+
+    if ($null -eq $resolvedMessage -or $null -eq $resolvedMessage.patient) {
         return @()
     }
 
@@ -380,7 +420,7 @@ function Extract-AssessmentItems {
     foreach ($entry in $dataClassPaths.GetEnumerator()) {
         $dataClassName = $entry.Key
         $dataPath = $entry.Value
-        $dataArray = $parsedMessage.patient.$dataPath
+        $dataArray = $resolvedMessage.patient.$dataPath
 
         if ($null -eq $dataArray) {
             continue
