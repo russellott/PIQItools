@@ -5,7 +5,8 @@ const xlsx = require('xlsx');
 
 const { convertSpreadsheetRowToMessageData, buildPiqiValidationRequest } = require('../core/lab-piqi-core');
 const { submitWithRetry } = require('../api/piqi-api');
-const { initializeAccessAuditStore, openConnection, insertAuditRecord, insertAssessmentResults, normalizeTableName } = require('../db/access-db');
+const { initializeAccessAuditStore, openConnection: openAccessConnection, insertAuditRecord: insertAccessAuditRecord, insertAssessmentResults: insertAccessAssessmentResults, normalizeTableName } = require('../db/access-db');
+const { createPool, initializePostgresAuditStore, insertAuditRecord: insertPgAuditRecord, insertAssessmentResults: insertPgAssessmentResults, normalizeTableName: normalizePgTableName } = require('../db/postgres-db');
 const { appendAuditRecord, initializeFlatFileAudit, closeFlatFileAudit } = require('../audit/flat-file-audit');
 const { extractAssessmentItems } = require('../audit/assessment-extractor');
 
@@ -14,6 +15,12 @@ function parseArgs(argv) {
         apiUrl: null,
         excelPath: null,
         accessDbPath: null,
+        // PostgreSQL options
+        pgHost: null,
+        pgPort: null,
+        pgDatabase: null,
+        pgUser: null,
+        pgPassword: null,
         auditOutputDir: null,
         worksheet: null,
         tableName: 'PiqiAuditLog',
@@ -58,6 +65,22 @@ function parseArgs(argv) {
                 break;
             case '--access-db':
                 options.accessDbPath = next;
+                break;
+            // PostgreSQL options
+            case '--pg-host':
+                options.pgHost = next;
+                break;
+            case '--pg-port':
+                options.pgPort = parseInt(next, 10);
+                break;
+            case '--pg-database':
+                options.pgDatabase = next;
+                break;
+            case '--pg-user':
+                options.pgUser = next;
+                break;
+            case '--pg-password':
+                options.pgPassword = next;
                 break;
             case '--audit-output-dir':
                 options.auditOutputDir = next;
@@ -109,10 +132,15 @@ function printUsage() {
     console.log('Usage: npm run process:lab -- --excel <file.xlsx> --api-url <url> --data-provider-id <id> --data-source-id <id> [options]');
     console.log('Options:');
     console.log('  --access-db <file.accdb>           Write audit records to Access');
+    console.log('  --pg-host <host>                   PostgreSQL host (default: localhost or PGHOST env)');
+    console.log('  --pg-port <port>                   PostgreSQL port (default: 5432 or PGPORT env)');
+    console.log('  --pg-database <name>               PostgreSQL database (default: piqi or PGDATABASE env)');
+    console.log('  --pg-user <user>                   PostgreSQL user (default: postgres or PGUSER env)');
+    console.log('  --pg-password <password>           PostgreSQL password (or PGPASSWORD env)');
     console.log('  --audit-output-dir <dir>           Write audit records to flat files (JSONL + CSV)');
     console.log('  --worksheet <name>                 Worksheet name (default: first sheet)');
-    console.log('  --table-name <name>                Access table name (default: PiqiAuditLog)');
-    console.log('  --assessment-table-name <name>     Assessment results table (default: PiqiAssessmentResults)');
+    console.log('  --table-name <name>                Audit table name (default: PiqiAuditLog / piqi_audit_log)');
+    console.log('  --assessment-table-name <name>     Assessment results table (default: PiqiAssessmentResults / piqi_assessment_results)');
     console.log('  --piqi-model <mnemonic>       PIQI model mnemonic (default: PAT_CLINICAL_V1)');
     console.log('  --rubric <mnemonic>           Evaluation rubric mnemonic (default: USCDI_V3)');
     console.log('  --start-row <number>          1-based row index where data starts (default: 2)');
@@ -123,17 +151,26 @@ function printUsage() {
     console.log('  --benchmark-output <file>     Write benchmark JSON summary to file');
 }
 
+function usePostgres(options) {
+    return !!(options.pgHost || options.pgPort || options.pgDatabase || options.pgUser || options.pgPassword ||
+              process.env.PGHOST || process.env.PGDATABASE);
+}
+
 function validateOptions(options) {
     if (!options.excelPath) throw new Error('--excel is required');
     if (!options.dataProviderID) throw new Error('--data-provider-id is required');
     if (!options.dataSourceID) throw new Error('--data-source-id is required');
-    if (!options.accessDbPath && !options.auditOutputDir) throw new Error('Provide at least one audit target: --access-db and/or --audit-output-dir');
+    if (!options.accessDbPath && !options.auditOutputDir && !usePostgres(options)) throw new Error('Provide at least one audit target: --access-db, --pg-host/--pg-database, and/or --audit-output-dir');
     if (!options.dryRun && !options.apiUrl) throw new Error('--api-url is required unless --dry-run is used');
     if (!Number.isInteger(options.maxRetries) || options.maxRetries < 0) throw new Error('--max-retries must be an integer >= 0');
     if (!Number.isInteger(options.retryDelayMs) || options.retryDelayMs < 0) throw new Error('--retry-delay-ms must be an integer >= 0');
     if (!Number.isInteger(options.startRow) || options.startRow < 1) throw new Error('--start-row must be an integer >= 1');
     if (options.accessDbPath) {
         normalizeTableName(options.tableName);
+    }
+    if (usePostgres(options)) {
+        normalizePgTableName(options.tableName);
+        normalizePgTableName(options.assessmentTableName);
     }
 }
 
@@ -191,14 +228,35 @@ async function processRows(options) {
     }
 
     const runId = crypto.randomBytes(12).toString('hex');
-    let connection = null;
+    let accessConnection = null;
+    let pgPool = null;
+    let pgClient = null;
     let flatFileAudit = null;
+
+    // PostgreSQL table names (lowercase with underscores)
+    const pgTableName = options.tableName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+    const pgAssessmentTableName = options.assessmentTableName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
 
     if (options.accessDbPath) {
         const accessInitStartedAt = Date.now();
         await initializeAccessAuditStore(options.accessDbPath, options.tableName, options.assessmentTableName);
-        connection = await openConnection(options.accessDbPath);
+        accessConnection = await openAccessConnection(options.accessDbPath);
         metrics.accessInitMs = Date.now() - accessInitStartedAt;
+    }
+
+    if (usePostgres(options)) {
+        const pgInitStartedAt = Date.now();
+        const pgConfig = {};
+        if (options.pgHost) pgConfig.host = options.pgHost;
+        if (options.pgPort) pgConfig.port = options.pgPort;
+        if (options.pgDatabase) pgConfig.database = options.pgDatabase;
+        if (options.pgUser) pgConfig.user = options.pgUser;
+        if (options.pgPassword) pgConfig.password = options.pgPassword;
+        
+        pgPool = createPool(pgConfig);
+        await initializePostgresAuditStore(pgPool, pgTableName, pgAssessmentTableName);
+        pgClient = await pgPool.connect();
+        metrics.accessInitMs += Date.now() - pgInitStartedAt;
     }
 
     if (options.auditOutputDir) {
@@ -277,8 +335,8 @@ async function processRows(options) {
                 responseBody: serializeBody(submissionResult.responseBody)
             };
 
-            if (connection) {
-                // DISABLED: await insertAuditRecord(connection, options.tableName, auditRecord);
+            if (accessConnection) {
+                // DISABLED: await insertAccessAuditRecord(accessConnection, options.tableName, auditRecord);
                 
                 // Extract and log detailed assessment results if response is successful
                 if (submissionResult.isSuccess && submissionResult.responseBodyText && submissionResult.responseBodyText !== 'DRY_RUN') {
@@ -291,10 +349,31 @@ async function processRows(options) {
 
                     if (assessmentRecords.length > 0) {
                         const accessWriteStartedAt = Date.now();
-                        await insertAssessmentResults(connection, options.assessmentTableName, assessmentRecords);
+                        await insertAccessAssessmentResults(accessConnection, options.assessmentTableName, assessmentRecords);
                         metrics.accessWriteMs += Date.now() - accessWriteStartedAt;
                     }
                 }
+            }
+
+            if (pgClient) {
+                // Insert audit record to PostgreSQL
+                const pgWriteStartedAt = Date.now();
+                await insertPgAuditRecord(pgClient, pgTableName, auditRecord);
+
+                // Extract and log detailed assessment results if response is successful
+                if (submissionResult.isSuccess && submissionResult.responseBodyText && submissionResult.responseBodyText !== 'DRY_RUN') {
+                    const assessmentExtractStartedAt = Date.now();
+                    const assessmentRecords = extractAssessmentItems(
+                        requestBody.messageID,
+                        submissionResult.responseBody
+                    );
+                    metrics.assessmentExtractMs += Date.now() - assessmentExtractStartedAt;
+
+                    if (assessmentRecords.length > 0) {
+                        await insertPgAssessmentResults(pgClient, pgAssessmentTableName, assessmentRecords);
+                    }
+                }
+                metrics.accessWriteMs += Date.now() - pgWriteStartedAt;
             }
 
             if (flatFileAudit) {
@@ -321,6 +400,9 @@ async function processRows(options) {
         if (options.accessDbPath) {
             console.log(`Access DB: ${path.resolve(options.accessDbPath)}`);
         }
+        if (pgPool) {
+            console.log(`PostgreSQL: ${options.pgHost || process.env.PGHOST || 'localhost'}:${options.pgPort || process.env.PGPORT || 5432}/${options.pgDatabase || process.env.PGDATABASE || 'piqi'}`);
+        }
         if (flatFileAudit) {
             console.log(`Audit JSONL: ${flatFileAudit.jsonlPath}`);
             console.log(`Audit CSV: ${flatFileAudit.csvPath}`);
@@ -330,8 +412,14 @@ async function processRows(options) {
         if (flatFileAudit) {
             await closeFlatFileAudit(flatFileAudit);
         }
-        if (connection) {
-            await connection.close();
+        if (accessConnection) {
+            await accessConnection.close();
+        }
+        if (pgClient) {
+            pgClient.release();
+        }
+        if (pgPool) {
+            await pgPool.end();
         }
         metrics.closeResourcesMs += Date.now() - closeStartedAt;
     }
